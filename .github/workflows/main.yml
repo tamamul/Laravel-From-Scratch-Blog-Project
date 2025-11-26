@@ -1,0 +1,58 @@
+name: Build Laravel ZIP + SQL
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.0'
+          extensions: mbstring, pdo, pdo_mysql, tokenizer, xml, ctype, json
+
+      - name: Install Composer Dependencies
+        run: composer install --no-dev --prefer-dist --optimize-autoloader
+
+      - name: Copy .env
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Setup MySQL
+        uses: ankane/setup-mysql@v1
+        with:
+          mysql-version: '8.0'
+
+      - name: Import empty database
+        run: |
+          mysql -u root -e "CREATE DATABASE IF NOT EXISTS $DB_DATABASE;"
+
+      - name: Dump Database to SQL
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_DATABASE: ${{ secrets.DB_DATABASE }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          mysqldump -h $DB_HOST -P $DB_PORT -u $DB_USERNAME -p$DB_PASSWORD $DB_DATABASE > backup.sql
+
+      - name: Create ZIP Output
+        run: |
+          zip -r laravel-package.zip . -x ".git/*" ".github/*"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: laravel-package
+          path: laravel-package.zip
