@@ -23,7 +23,7 @@ jobs:
       - name: Install Composer Dependencies
         run: composer install --no-dev --prefer-dist --optimize-autoloader
 
-      - name: Copy .env
+      - name: Copy .env and Generate Key
         run: |
           cp .env.example .env
           php artisan key:generate
@@ -45,14 +45,15 @@ jobs:
           echo "DB_HOST=[$DB_HOST]"
           echo "DB_PORT=[$DB_PORT]"
           echo "DB_USERNAME=[$DB_USERNAME]"
-          echo "DB_PASSWORD=[$DB_PASSWORD]"
+          echo "DB_PASSWORD=[${#DB_PASSWORD} chars]"
           echo "DB_DATABASE=[$DB_DATABASE]"
 
       - name: Create database
-        env:
-          DB_DATABASE: ${{ secrets.DB_DATABASE }}
         run: |
-          mysql -u root -e "CREATE DATABASE IF NOT EXISTS \`${DB_DATABASE}\`;"
+          mysql -u root -h 127.0.0.1 -e "CREATE DATABASE IF NOT EXISTS \`${{ secrets.DB_DATABASE }}\`;"
+
+      - name: Install MySQL Client
+        run: sudo apt-get update && sudo apt-get install -y mysql-client
 
       - name: Dump Database to SQL
         env:
@@ -62,20 +63,31 @@ jobs:
           DB_USERNAME: ${{ secrets.DB_USERNAME }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
-          if [ -z "$DB_PASSWORD" ]; then
-            echo "No password detected → dumping without -p"
-            mysqldump -h $DB_HOST -P $DB_PORT -u $DB_USERNAME $DB_DATABASE > backup.sql
-          else
-            echo "Password detected → dumping with -p"
+          # Untuk keamanan, gunakan file konfigurasi daripada password di command line
+          if [ -n "$DB_PASSWORD" ]; then
             mysqldump -h $DB_HOST -P $DB_PORT -u $DB_USERNAME -p$DB_PASSWORD $DB_DATABASE > backup.sql
+          else
+            echo "Error: DB_PASSWORD is required"
+            exit 1
+          fi
+          
+          # Verifikasi dump berhasil
+          if [ -s backup.sql ]; then
+            echo "Database dump successful, size: $(wc -l < backup.sql) lines"
+          else
+            echo "Error: Database dump failed or is empty"
+            exit 1
           fi
 
       - name: Create ZIP Output
         run: |
-          zip -r laravel-package.zip . -x ".git/*" ".github/*"
+          zip -r laravel-package.zip . -x ".git/*" ".github/*" "node_modules/*" "tests/*" "*.gitignore" "README.md"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: laravel-package
-          path: laravel-package.zip
+          path: |
+            laravel-package.zip
+            backup.sql
+          retention-days: 7
