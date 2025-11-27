@@ -28,65 +28,98 @@ jobs:
           cp .env.example .env
           php artisan key:generate
 
-      - name: Setup MySQL Service
+      - name: Setup MySQL with proper authentication
         uses: ankane/setup-mysql@v1
         with:
           mysql-version: '8.0'
           root-password: root
-          database: laravel_local
+          database: laravel_app
+
+      - name: Configure MySQL for password access
+        run: |
+          # Reset MySQL root password dan konfigurasi akses
+          sudo mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'root';"
+          sudo mysql -e "FLUSH PRIVILEGES;"
+          sudo systemctl restart mysql
 
       - name: Wait for MySQL to be ready
         run: |
-          sudo systemctl status mysql
+          sleep 5
           mysql -h 127.0.0.1 -u root -proot -e "SELECT 1;" --connect-timeout=30
 
-      - name: Run Migrations and Seeders
+      - name: Create and setup database
         run: |
-          mysql -h 127.0.0.1 -u root -proot -e "CREATE DATABASE IF NOT EXISTS laravel_local;"
+          mysql -h 127.0.0.1 -u root -proot -e "CREATE DATABASE IF NOT EXISTS laravel_app;"
+          mysql -h 127.0.0.1 -u root -proot -e "SHOW DATABASES;"
+
+      - name: Update .env with database configuration
+        run: |
+          sed -i 's/DB_CONNECTION=.*/DB_CONNECTION=mysql/' .env
+          sed -i 's/DB_HOST=.*/DB_HOST=127.0.0.1/' .env
+          sed -i 's/DB_PORT=.*/DB_PORT=3306/' .env
+          sed -i 's/DB_DATABASE=.*/DB_DATABASE=laravel_app/' .env
+          sed -i 's/DB_USERNAME=.*/DB_USERNAME=root/' .env
+          sed -i 's/DB_PASSWORD=.*/DB_PASSWORD=root/' .env
+          cat .env | grep DB_
+
+      - name: Run Migrations
+        run: |
           php artisan migrate --force
-          php artisan db:seed --force
 
-      - name: Dump Local Database
+      - name: Run Seeders (if exists)
         run: |
-          mysqldump -h 127.0.0.1 -u root -proot laravel_local > backup.sql
-          echo "Database dump completed. File size: $(ls -lh backup.sql | awk '{print $5}')"
-          head -n 10 backup.sql
+          if [ -f "database/seeders/DatabaseSeeder.php" ]; then
+            php artisan db:seed --force
+          else
+            echo "No seeders found, skipping..."
+          fi
 
-      - name: Create .env.production
+      - name: Dump Database
+        run: |
+          mysqldump -h 127.0.0.1 -u root -proot laravel_app > backup.sql
+          echo "✅ Database dump completed successfully!"
+          echo "📊 File size: $(ls -lh backup.sql | awk '{print $5}')"
+          echo "📄 First few lines:"
+          head -n 5 backup.sql
+
+      - name: Create production environment template
         run: |
           cat > .env.production << EOF
-          APP_NAME=Laravel
+          APP_NAME="Laravel App"
           APP_ENV=production
-          APP_KEY=$(php artisan key:generate --show)
+          APP_KEY=$(grep APP_KEY .env | cut -d '=' -f2)
           APP_DEBUG=false
           APP_URL=http://localhost
-          
+
           DB_CONNECTION=mysql
           DB_HOST=127.0.0.1
           DB_PORT=3306
-          DB_DATABASE=laravel_local
+          DB_DATABASE=laravel_app
           DB_USERNAME=root
           DB_PASSWORD=root
+
+          CACHE_DRIVER=file
+          QUEUE_CONNECTION=sync
+          SESSION_DRIVER=file
           EOF
 
-      - name: Create ZIP Output
+      - name: Create ZIP Package
         run: |
-          # File yang akan disertakan dalam package
-          zip -r laravel-package.zip \
-            . \
-            -x ".git/*" \
-            ".github/*" \
-            "node_modules/*" \
-            "tests/*" \
-            "*.gitignore" \
-            "README.md" \
-            "backup.sql"  # Exclude backup.sql sementara
-
-          # Tambahkan backup.sql secara terpisah
-          zip -u laravel-package.zip backup.sql
-          zip -u laravel-package.zip .env.production
-
-          echo "Package created successfully!"
+          # Buat direktori temporary untuk package
+          mkdir -p laravel-package
+          
+          # Copy semua file yang diperlukan (kecuali yang tidak perlu)
+          cp -r app bootstrap config database public resources routes storage vendor laravel-package/
+          cp artisan composer.json composer.lock .env.production backup.sql laravel-package/
+          
+          # Buat storage linkable
+          cd laravel-package && mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views
+          
+          # Buat ZIP
+          zip -r ../laravel-package.zip .
+          cd ..
+          
+          echo "✅ Package created successfully!"
           ls -la *.zip
 
       - name: Upload Artifact
@@ -96,12 +129,13 @@ jobs:
           path: |
             laravel-package.zip
             backup.sql
+            .env.production
           retention-days: 30
 
-      - name: Show Artifact Info
+      - name: Show Success Message
         run: |
-          echo "✅ Build completed successfully!"
-          echo "📦 Artifact contains:"
-          echo "   - Laravel application (laravel-package.zip)"
-          echo "   - Database dump (backup.sql)"
+          echo "🎉 Build completed successfully!"
+          echo "📦 Artifact 'laravel-package' contains:"
+          echo "   - Laravel application (ready for deployment)"
+          echo "   - Database dump (backup.sql)" 
           echo "   - Production environment template (.env.production)"
