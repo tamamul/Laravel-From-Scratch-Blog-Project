@@ -33,7 +33,22 @@ jobs:
         with:
           mysql-version: '8.0'
 
-      - name: Import empty database
+      # Debug untuk memastikan secrets masuk
+      - name: Debug ENV
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_DATABASE: ${{ secrets.DB_DATABASE }}
+        run: |
+          echo "DB_HOST=[$DB_HOST]"
+          echo "DB_PORT=[$DB_PORT]"
+          echo "DB_USERNAME=[$DB_USERNAME]"
+          echo "DB_PASSWORD=[$DB_PASSWORD]"
+          echo "DB_DATABASE=[$DB_DATABASE]"
+
+      - name: Create database
         env:
           DB_DATABASE: ${{ secrets.DB_DATABASE }}
         run: |
