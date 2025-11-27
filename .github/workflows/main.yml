@@ -33,7 +33,7 @@ jobs:
         with:
           mysql-version: '8.0'
 
-      # Debug untuk memastikan secrets masuk
+      # Debug secrets
       - name: Debug ENV
         env:
           DB_HOST: ${{ secrets.DB_HOST }}
@@ -55,20 +55,21 @@ jobs:
           mysql -u root -e "CREATE DATABASE IF NOT EXISTS \`${DB_DATABASE}\`;"
 
       - name: Dump Database to SQL
-  env:
-    DB_HOST: ${{ secrets.DB_HOST }}
-    DB_PORT: ${{ secrets.DB_PORT }}
-    DB_DATABASE: ${{ secrets.DB_DATABASE }}
-    DB_USERNAME: ${{ secrets.DB_USERNAME }}
-    DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-  run: |
-    if [ -z "$DB_PASSWORD" ]; then
-      echo "No password detected → dumping without -p"
-      mysqldump -h $DB_HOST -P $DB_PORT -u $DB_USERNAME $DB_DATABASE > backup.sql
-    else
-      echo "Password detected → dumping with -p"
-      mysqldump -h $DB_HOST -P $DB_PORT -u $DB_USERNAME -p$DB_PASSWORD $DB_DATABASE > backup.sql
-    fi
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_DATABASE: ${{ secrets.DB_DATABASE }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          if [ -z "$DB_PASSWORD" ]; then
+            echo "No password detected → dumping without -p"
+            mysqldump -h $DB_HOST -P $DB_PORT -u $DB_USERNAME $DB_DATABASE > backup.sql
+          else
+            echo "Password detected → dumping with -p"
+            mysqldump -h $DB_HOST -P $DB_PORT -u $DB_USERNAME -p$DB_PASSWORD $DB_DATABASE > backup.sql
+          fi
+
       - name: Create ZIP Output
         run: |
           zip -r laravel-package.zip . -x ".git/*" ".github/*"
