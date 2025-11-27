@@ -28,60 +28,66 @@ jobs:
           cp .env.example .env
           php artisan key:generate
 
-      - name: Setup MySQL
+      - name: Setup MySQL Service
         uses: ankane/setup-mysql@v1
         with:
           mysql-version: '8.0'
+          root-password: root
+          database: laravel_local
 
-      # Debug secrets
-      - name: Debug ENV
-        env:
-          DB_HOST: ${{ secrets.DB_HOST }}
-          DB_PORT: ${{ secrets.DB_PORT }}
-          DB_USERNAME: ${{ secrets.DB_USERNAME }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_DATABASE: ${{ secrets.DB_DATABASE }}
+      - name: Wait for MySQL to be ready
         run: |
-          echo "DB_HOST=[$DB_HOST]"
-          echo "DB_PORT=[$DB_PORT]"
-          echo "DB_USERNAME=[$DB_USERNAME]"
-          echo "DB_PASSWORD=[${#DB_PASSWORD} chars]"
-          echo "DB_DATABASE=[$DB_DATABASE]"
+          sudo systemctl status mysql
+          mysql -h 127.0.0.1 -u root -proot -e "SELECT 1;" --connect-timeout=30
 
-      - name: Create database
+      - name: Run Migrations and Seeders
         run: |
-          mysql -u root -h 127.0.0.1 -e "CREATE DATABASE IF NOT EXISTS \`${{ secrets.DB_DATABASE }}\`;"
+          mysql -h 127.0.0.1 -u root -proot -e "CREATE DATABASE IF NOT EXISTS laravel_local;"
+          php artisan migrate --force
+          php artisan db:seed --force
 
-      - name: Install MySQL Client
-        run: sudo apt-get update && sudo apt-get install -y mysql-client
-
-      - name: Dump Database to SQL
-        env:
-          DB_HOST: ${{ secrets.DB_HOST }}
-          DB_PORT: ${{ secrets.DB_PORT }}
-          DB_DATABASE: ${{ secrets.DB_DATABASE }}
-          DB_USERNAME: ${{ secrets.DB_USERNAME }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      - name: Dump Local Database
         run: |
-          # Untuk keamanan, gunakan file konfigurasi daripada password di command line
-          if [ -n "$DB_PASSWORD" ]; then
-            mysqldump -h $DB_HOST -P $DB_PORT -u $DB_USERNAME -p$DB_PASSWORD $DB_DATABASE > backup.sql
-          else
-            echo "Error: DB_PASSWORD is required"
-            exit 1
-          fi
+          mysqldump -h 127.0.0.1 -u root -proot laravel_local > backup.sql
+          echo "Database dump completed. File size: $(ls -lh backup.sql | awk '{print $5}')"
+          head -n 10 backup.sql
+
+      - name: Create .env.production
+        run: |
+          cat > .env.production << EOF
+          APP_NAME=Laravel
+          APP_ENV=production
+          APP_KEY=$(php artisan key:generate --show)
+          APP_DEBUG=false
+          APP_URL=http://localhost
           
-          # Verifikasi dump berhasil
-          if [ -s backup.sql ]; then
-            echo "Database dump successful, size: $(wc -l < backup.sql) lines"
-          else
-            echo "Error: Database dump failed or is empty"
-            exit 1
-          fi
+          DB_CONNECTION=mysql
+          DB_HOST=127.0.0.1
+          DB_PORT=3306
+          DB_DATABASE=laravel_local
+          DB_USERNAME=root
+          DB_PASSWORD=root
+          EOF
 
       - name: Create ZIP Output
         run: |
-          zip -r laravel-package.zip . -x ".git/*" ".github/*" "node_modules/*" "tests/*" "*.gitignore" "README.md"
+          # File yang akan disertakan dalam package
+          zip -r laravel-package.zip \
+            . \
+            -x ".git/*" \
+            ".github/*" \
+            "node_modules/*" \
+            "tests/*" \
+            "*.gitignore" \
+            "README.md" \
+            "backup.sql"  # Exclude backup.sql sementara
+
+          # Tambahkan backup.sql secara terpisah
+          zip -u laravel-package.zip backup.sql
+          zip -u laravel-package.zip .env.production
+
+          echo "Package created successfully!"
+          ls -la *.zip
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -90,4 +96,12 @@ jobs:
           path: |
             laravel-package.zip
             backup.sql
-          retention-days: 7
+          retention-days: 30
+
+      - name: Show Artifact Info
+        run: |
+          echo "✅ Build completed successfully!"
+          echo "📦 Artifact contains:"
+          echo "   - Laravel application (laravel-package.zip)"
+          echo "   - Database dump (backup.sql)"
+          echo "   - Production environment template (.env.production)"
